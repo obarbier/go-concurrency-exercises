@@ -3,10 +3,20 @@ package main
 import (
 	"io"
 	"log"
+	"net"
+	"os"
+	"fmt"
 )
 
 func main() {
-	// TODO: connect to server on localhost port 8000
+	// Example from https://golang.org/pkg/net/
+	conn, err := net.Dial("tcp", "localhost:8080")
+	if err != nil {
+		// handle error
+		fmt.Println("connection fail")
+	}
+
+	mustCopy( os.Stdout ,conn)
 
 }
 

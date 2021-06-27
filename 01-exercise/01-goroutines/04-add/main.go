@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
+	"go-concurrency-exercises/01-exercise-solution/01-goroutines/04-add/counting"
 	"time"
-
-	"go-concurrency-exercises/01-exercise/01-goroutines/04-add/counting"
 )
 
 func main() {

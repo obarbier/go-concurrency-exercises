@@ -7,7 +7,19 @@ import (
 )
 
 func main() {
-	// TODO: write server program to handle concurrent client connections.
+	// Example from https://golang.org/pkg/net/
+	ln, err := net.Listen("tcp", "localhost:8080")
+	if err != nil {
+		// handle error
+	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			// handle error
+			continue
+		}
+		go handleConn(conn)
+	}
 
 }
 
