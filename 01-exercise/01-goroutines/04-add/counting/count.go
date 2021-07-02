@@ -4,9 +4,9 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
-	"time"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 func init() {
@@ -46,7 +46,7 @@ func AddConcurrent(numbers []int) int64 {
 	wg.Add(numCPU)
 	// Run computation for each part in seperate goroutine.
 	for _, group := range dividedGroup {
-		go func( nums []int){
+		go func(nums []int) {
 			var partSum int64
 			defer wg.Done()
 			for _, n := range numbers {
@@ -69,9 +69,9 @@ func splitSlice(s []int, chunks int) [][]int {
 		length = int(math.Floor(float64(len(s)) / float64(chunks)))
 	}
 	var end int
-	for i := 0; i < len(s) -1; i += length {
+	for i := 0; i < len(s)-1; i += length {
 		end = i + length
-		if end >= len(s) -1 {
+		if end >= len(s)-1 {
 			newSlice = append(newSlice, s[i:])
 
 		} else {
