@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/disintegration/imaging"
@@ -103,33 +104,42 @@ func walkFiles(root string) <-chan *walkResult {
 // return pointer to thumbnail image in memory.
 func processImage(path <-chan *walkResult) <-chan *processImageResult {
 	out := make(chan *processImageResult)
-
-	go func() {
-		defer close(out)
-		for p := range path {
-			if p.Err != nil {
-				out <- &processImageResult{
-					Err: p.Err, //Propagating the errors
-				}
-			} else {
-				srcImage, err := imaging.Open(p.Path)
-				if err != nil {
+	scalefactor := 5
+	var wg sync.WaitGroup
+	for i := 1; i <= scalefactor; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for p := range path {
+				if p.Err != nil {
 					out <- &processImageResult{
-						Err: err,
+						Err: p.Err, //Propagating the errors
 					}
 				} else {
-					// scale the image to 100px * 100px
-					out <- &processImageResult{
-						SrcImagePath:   p.Path,
-						ThumbnailImage: imaging.Thumbnail(srcImage, 100, 100, imaging.Lanczos),
-						Err:            nil,
+					srcImage, err := imaging.Open(p.Path)
+					if err != nil {
+						out <- &processImageResult{
+							Err: err,
+						}
+					} else {
+						// scale the image to 100px * 100px
+						out <- &processImageResult{
+							SrcImagePath:   p.Path,
+							ThumbnailImage: imaging.Thumbnail(srcImage, 100, 100, imaging.Lanczos),
+							Err:            nil,
+						}
 					}
+
 				}
-
 			}
-		}
-	}()
+		}()
+	}
 
+	go func() {
+		wg.Wait()
+		close(out)
+
+	}()
 	return out
 
 }
