@@ -1,30 +1,51 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/disintegration/imaging"
 )
 
+type walkResult struct {
+	Path string
+	Err  error
+}
+
+type processImageResult struct {
+	SrcImagePath   string
+	ThumbnailImage *image.NRGBA
+	Err            error
+}
+
+type saveResult struct {
+	ok  bool
+	err error
+}
+
 // Image processing - sequential
 // Input - directory with images.
 // output - thumbnail images
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
 	if len(os.Args) < 2 {
 		log.Fatal("need to send directory path of images")
 	}
 	start := time.Now()
+	//FIXME
+	ch1 := saveThumbnail(processImage(walkFiles(os.Args[1])))
 
-	err := walkFiles(os.Args[1])
-
-	if err != nil {
-		log.Fatal(err)
+	for c := range ch1 {
+		if !c.ok {
+			fmt.Println("Error occured: ", c.err)
+		}
 	}
 	fmt.Printf("Time taken: %s\n", time.Since(start))
 }
@@ -33,73 +54,113 @@ func main() {
 // does the file walk
 // generates thumbnail images
 // saves the image to thumbnail directory.
-func walkFiles(root string) error {
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+func walkFiles(root string) <-chan *walkResult {
+	out := make(chan *walkResult) // Channel for path variable
 
-		// filter out error
-		if err != nil {
-			return err
-		}
+	go func() {
+		defer close(out)
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			// filter out error
+			if err != nil {
+				out <- &walkResult{
+					Err: err,
+				}
+			}
 
-		// check if it is file
-		if !info.Mode().IsRegular() {
+			// check if it is file
+			if !info.Mode().IsRegular() {
+				out <- &walkResult{
+					Err: errors.New(fmt.Sprintf("%s is not a file", path)),
+				}
+			}
+
+			// check if it is image/jpeg
+			contentType, _ := getFileContentType(path)
+			if contentType != "image/jpeg" {
+				out <- &walkResult{
+					Err: errors.New(fmt.Sprintf("%s is not of contenttype image/jpeg", path)),
+				}
+			}
+
+			out <- &walkResult{
+				Path: path,
+				Err:  nil,
+			}
+
 			return nil
-		}
+		})
 
-		// check if it is image/jpeg
-		contentType, _ := getFileContentType(path)
-		if contentType != "image/jpeg" {
-			return nil
-		}
-
-		// process the image
-		thumbnailImage, err := processImage(path)
 		if err != nil {
-			return err
+			out <- &walkResult{
+				Err: err,
+			}
 		}
-
-		// save the thumbnail image to disk
-		err = saveThumbnail(path, thumbnailImage)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-
-	if err != nil {
-		return err
-	}
-	return nil
+	}()
+	return out
 }
 
 // processImage - takes image file as input
 // return pointer to thumbnail image in memory.
-func processImage(path string) (*image.NRGBA, error) {
+func processImage(path <-chan *walkResult) <-chan *processImageResult {
+	out := make(chan *processImageResult)
 
-	// load the image from file
-	srcImage, err := imaging.Open(path)
-	if err != nil {
-		return nil, err
-	}
+	go func() {
+		defer close(out)
+		for p := range path {
+			if p.Err != nil {
+				out <- &processImageResult{
+					Err: p.Err, //Propagating the errors
+				}
+			} else {
+				srcImage, err := imaging.Open(p.Path)
+				if err != nil {
+					out <- &processImageResult{
+						Err: err,
+					}
+				} else {
+					// scale the image to 100px * 100px
+					out <- &processImageResult{
+						SrcImagePath:   p.Path,
+						ThumbnailImage: imaging.Thumbnail(srcImage, 100, 100, imaging.Lanczos),
+						Err:            nil,
+					}
+				}
 
-	// scale the image to 100px * 100px
-	thumbnailImage := imaging.Thumbnail(srcImage, 100, 100, imaging.Lanczos)
+			}
+		}
+	}()
 
-	return thumbnailImage, nil
+	return out
+
 }
 
 // saveThumbnail - save the thumnail image to folder
-func saveThumbnail(srcImagePath string, thumbnailImage *image.NRGBA) error {
-	filename := filepath.Base(srcImagePath)
-	dstImagePath := "thumbnail/" + filename
+func saveThumbnail(pir <-chan *processImageResult) <-chan *saveResult {
+	out := make(chan *saveResult)
 
-	// save the image in the thumbnail folder.
-	err := imaging.Save(thumbnailImage, dstImagePath)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%s -> %s\n", srcImagePath, dstImagePath)
-	return nil
+	go func() {
+		defer close(out)
+		for p := range pir {
+			if p.Err != nil {
+				out <- &saveResult{
+					err: p.Err, //Propagating the errors
+				}
+			} else {
+				filename := filepath.Base(p.SrcImagePath)
+				dstImagePath := "thumbnail/" + filename
+				err := imaging.Save(p.ThumbnailImage, dstImagePath)
+				if err != nil {
+					out <- &saveResult{
+						ok:  false,
+						err: err,
+					}
+				}
+				fmt.Printf("%s -> %s\n", p.SrcImagePath, dstImagePath)
+			}
+		}
+	}()
+
+	return out
 }
 
 // getFileContentType - return content type and error status
